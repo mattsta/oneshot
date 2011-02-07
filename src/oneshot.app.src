@@ -1,0 +1,11 @@
+{application, oneshot,
+ [
+  {description, "oneshot: a do-then-die server for TCP conncections"},
+  {vsn, "1.0.4a"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {env, []}
+ ]}.
