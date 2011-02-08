@@ -11,16 +11,10 @@
 start_link(IP, Port, ModuleOrFun) -> 
   gen_server:start_link(?MODULE, [IP, Port, ModuleOrFun], []).
 
-init([PreIP, Port, ModuleOrFun]) ->
+init([PreIP, Port, ModuleOrFun]) when is_list(PreIP) orelse is_tuple(PreIP) ->
   process_flag(trap_exit, true),
 
-  % Be nice and let people specify IPs as strings or tuples.
-  IP = case PreIP of
-         I when is_list(I) -> Toks = string:tokens(I, "."),
-                              Ints = [list_to_integer(T) || T <- Toks],
-                              list_to_tuple(Ints);
-         I when is_tuple(I) -> I
-       end,
+  {ok, IP} = inet:getaddr(PreIP, inet),
 
   %% The socket options will be set on the acceptor socket automatically
   Listen = gen_tcp:listen(Port, [binary, {packet, raw}, {reuseaddr, true},
