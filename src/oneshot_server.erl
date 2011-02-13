@@ -6,7 +6,9 @@
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 -export([terminate/2, code_change/3]).
 
--record(state, {listener, acceptor, module}).
+-record(state, {listener  :: pid(),
+                 acceptor :: any(), % opaque identifier
+                 module   :: atom() | fun()}).
 
 start_link(IP, Port, ModuleOrFun) -> 
   gen_server:start_link(?MODULE, [IP, Port, ModuleOrFun], []).
