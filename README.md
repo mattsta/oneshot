@@ -37,7 +37,8 @@ closes.
         init() -> oneshot:start_link("127.0.0.1", 6643, fun handler/0).
 
 ### More Complex Usage
-Here, we encapsulate a function in a local fun to provide state information
+If we need local state information in the handler,
+encapsulate a function in a local fun to provide state information
 to our handler (because all handlers must have arity 0):
         handler(ServerPid) ->
           handler(ServerPid, []).
@@ -66,6 +67,14 @@ Building
 Build:
         rebar compile
 
+Test
+----
+Automated concurrency tests:
+        rebar eunit
+
+Automated concurrency tests with timing details:
+        rebar eunit -v
+
 History
 -------
 The generic non-blocking/async TCP server code originated at
@@ -73,4 +82,4 @@ http://www.trapexit.org/Building_a_Non-blocking_TCP_server_using_OTP_principles
 which I used in my `tt` project to spawn one FSM per connection.  I generalized
 the spawn-per-connect processing into `oneshot` for use in 
 `erlang-stdinout-pool`.  Hopefully other projects can find a use for a simple
-TCP connection abstraction too.
+TCP connection abstraction.
