@@ -40,14 +40,25 @@ handle_info({inet_async, ListSock, Ref, {ok, CliSocket}},
              #state{listener=ListSock, acceptor=Ref,
              module=ModuleOrFun} = State) ->
   case set_sockopt(ListSock, CliSocket) of
-    ok -> 
-          case ModuleOrFun of
-            M when is_function(M) -> ClientPid = spawn_link(M);
-            M when is_atom(M)     -> {ok, ClientPid} = M:start_link()
-          end,
-          gen_tcp:controlling_process(CliSocket, ClientPid),
-          %% Tell the spawned process it owns the socket.
-          ClientPid ! {socket_ready, CliSocket},
+    ok -> Launch = fun() ->
+                     ClientPid =
+                     case ModuleOrFun of
+                       M when is_function(M) -> spawn_link(M);
+                       M when is_atom(M)     -> {ok, Pid} = M:start_link(),
+                                                Pid
+                     end,
+                     % Block until we receive socket_assigned from oneshot.
+                     % We can only set controlling_process after this process
+                     % is given control itself by the async handle_info.
+                     receive
+                       socket_assigned -> ok
+                     end,
+                     gen_tcp:controlling_process(CliSocket, ClientPid),
+                     ClientPid ! {socket_ready, CliSocket}
+                   end,
+          Launched = spawn(Launch),
+          gen_tcp:controlling_process(CliSocket, Launched),
+          Launched ! socket_assigned,
           {ok, NewRef} = prim_inet:async_accept(ListSock, -1),
           {noreply, State#state{acceptor=NewRef}};
     {error, Reason} -> 
