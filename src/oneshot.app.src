@@ -1,7 +1,8 @@
 {application, oneshot,
  [
-  {description, "oneshot: a do-then-die server for TCP conncections"},
-  {vsn, "1.0.4a"},
+  {description, "oneshot: Async listen on an IP and Port then quickly hand the "
+                "client socket to another function."},
+  {vsn, "1.7.0"},
   {registered, []},
   {applications, [
                   kernel,
