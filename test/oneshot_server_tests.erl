@@ -24,9 +24,10 @@ echo_server() ->
 -define(S2, {"localhost", 6652}).
 -define(S3, {"localhost", 6653}).
 setup_servers() ->
+  oneshot_sup:start_link(),
   S1 = oneshot_server:start_link("127.0.0.1", 6651, fun echo_server/0),
   S2 = oneshot_server:start_link("127.0.0.1", 6652, fun echo_server/0),
-  S3 = oneshot_server:start_link("127.0.0.1", 6653, fun echo_server/0),
+  S3 = oneshot_sup:start_oneshot("127.0.0.1", 6653, fun echo_server/0),
 
   [P || {ok, P} <- [S1, S2, S3]].
 

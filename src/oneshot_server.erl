@@ -1,20 +1,33 @@
 -module(oneshot_server).
 -behaviour(gen_server).
 
--export([start_link/3]).
+-export([start_link/3, start_link/4, start_link/5]).
 -export([init/1]).
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 -export([terminate/2, code_change/3]).
 
 -record(state, {listener  :: pid(),
                  acceptor :: any(), % opaque identifier
-                 module   :: atom() | fun()}).
+                 module   :: atom() | fun(),
+                 function :: atom(),
+                 args     :: list()}).
 
-start_link(IP, Port, ModuleOrFun) -> 
-  gen_server:start_link(?MODULE, [IP, Port, ModuleOrFun], []).
+start_link(IP, Port, ModuleOrFun) ->
+  % We default to start_link so the previous API that defaulted to using
+  % Module:start_link(Args)
+  gen_server:start_link(?MODULE, [IP, Port, ModuleOrFun, start_link, []], []).
 
-init([PreIP, Port, ModuleOrFun]) when is_list(PreIP) orelse is_tuple(PreIP) ->
-  process_flag(trap_exit, true),
+start_link(IP, Port, Module, Function) ->
+  % User can override Function here so we don't unnecessarily start_link.
+  gen_server:start_link(?MODULE, [IP, Port, Module, Function, []], []).
+
+start_link(IP, Port, M, F, A) ->
+  gen_server:start_link(?MODULE, [IP, Port, M, F, A], []).
+
+
+init([PreIP, Port, ModuleOrFun, Function, Args]) when
+    (is_list(PreIP) orelse is_tuple(PreIP)) andalso is_atom(Function) ->
+%  process_flag(trap_exit, true),
 
   {ok, IP} = inet:getaddr(PreIP, inet),
 
