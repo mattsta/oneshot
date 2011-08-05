@@ -40,72 +40,80 @@ init([PreIP, Port, ModuleOrFun, Function, Args]) when
                     {ok, Ref} = prim_inet:async_accept(Socket, -1),
                     {ok, #state{listener        = Socket,
                                 acceptor        = Ref,
-                                module          = ModuleOrFun}};
+                                module          = ModuleOrFun,
+                                function        = Function,
+                                args            = Args}};
     {error, Reason} -> {stop, Reason}
   end.
 
-handle_call(_Msg, _From, State) -> {noreply, State}.
+handle_call(oneshot_shutdown, _From, State) ->
+  {stop, normal, shutdown_complete, State}.
+
 handle_cast(_Msg, State) -> {noreply, State}.
 terminate(_Reason, _State) -> ok.
 code_change(_OldVersion, State, _Extra) -> {ok, State}.
 
-handle_info({inet_async, ListSock, Ref, {ok, CliSocket}}, 
-             #state{listener=ListSock, acceptor=Ref,
-             module=ModuleOrFun} = State) ->
-  case set_sockopt(ListSock, CliSocket) of
-    ok -> Launch = fun() ->
-                     ClientPid =
-                     case ModuleOrFun of
-                       M when is_function(M) -> spawn_link(M);
-                       M when is_atom(M)     -> {ok, Pid} = M:start_link(),
-                                                Pid
-                     end,
-                     % Block until we receive socket_assigned from oneshot.
-                     % We can only set controlling_process after this process
-                     % is given control itself by the async handle_info.
-                     receive
-                       socket_assigned -> ok
-                     end,
-                     gen_tcp:controlling_process(CliSocket, ClientPid),
-                     ClientPid ! {socket_ready, CliSocket}
-                   end,
+handle_info({inet_async, ListenSock, Ref, {ok, CliSock}},
+             #state{listener=ListenSock, acceptor=Ref,
+             module=ModuleOrFun,
+             function=F,
+             args=A} = State) ->
+  case set_sockopt(ListenSock, CliSock) of
+    ok -> Launch = launch_client(CliSock, ModuleOrFun, F, A),
           Launched = spawn(Launch),
-          gen_tcp:controlling_process(CliSocket, Launched),
+          gen_tcp:controlling_process(CliSock, Launched),
           Launched ! socket_assigned,
-          {ok, NewRef} = prim_inet:async_accept(ListSock, -1),
+          {ok, NewRef} = prim_inet:async_accept(ListenSock, -1),
           {noreply, State#state{acceptor=NewRef}};
-    {error, Reason} -> 
+    {error, Reason} ->
         error_logger:error_msg("Error setting socket options: ~p.\n", [Reason]),
         {stop, Reason, State}
   end;
 
-handle_info({inet_async, ListSock, Ref, Error}, 
-            #state{listener=ListSock, acceptor=Ref} = State) ->
+handle_info({inet_async, ListenSock, Ref, Error},
+            #state{listener=ListenSock, acceptor=Ref} = State) ->
   error_logger:error_msg("Error in socket acceptor: ~p.\n", [Error]),
   {stop, exceeded_accept_retry_count, State};
 
-handle_info({'EXIT', Pid, no_socket}, State) ->
-  % The back end didn't have any usable sockets left.
-  % It cleaned up its connections and there is nothing else to do.
-  % Let's log it.
-  error_logger:error_msg("Pid ~p ran out of sockets!~n", [Pid]),
-  {noreply, State};
+%handle_info({'EXIT', _, _} = Exit, State) ->
+%  error_logger:error_msg("Caught exit of: ~p~n", [Exit]),
+  % something exited.  Ignore it.  (from a linked process)
+%  {noreply, State};
 
-handle_info({'EXIT', _Pid, normal}, State) ->
-  {noreply, State};
-
-handle_info({'EXIT', _, _}, State) ->
-  % something else exited.  Ignore it.  (from a linked process)
+handle_info(Other, State) ->
+  error_logger:error_msg("oneshot_server: unexpected info of ~p~n", [Other]),
   {noreply, State}.
 
-set_sockopt(ListSock, CliSocket) ->
-  true = inet_db:register_socket(CliSocket, inet_tcp),
-  case prim_inet:getopts(ListSock, [active, nodelay, 
-                                    keepalive, delay_send, priority, tos]) of
-    {ok, Opts} -> case prim_inet:setopts(CliSocket, Opts) of
+set_sockopt(ListenSock, CliSock) ->
+  true = inet_db:register_socket(CliSock, inet_tcp),
+  case prim_inet:getopts(ListenSock, [active, nodelay,
+                                      keepalive, delay_send, priority, tos]) of
+    {ok, Opts} -> case prim_inet:setopts(CliSock, Opts) of
                     ok    -> ok;
-                    Error -> gen_tcp:close(CliSocket),
+                    Error -> gen_tcp:close(CliSock),
                              Error
                   end;
-     Error -> gen_tcp:close(CliSocket), Error
+     Error -> gen_tcp:close(CliSock), Error
+  end.
+
+-spec launch_client(port(), atom() | function(), atom(), list()) -> function().
+launch_client(CliSock, ModuleOrFun, F, A) ->
+  fun() ->
+    ClientPid = case ModuleOrFun of
+                  M when is_function(M) -> spawn(M);
+                  M when is_atom(M)     -> case apply(M, F, A) of
+                                             {ok, Pid} -> unlink(Pid), Pid;
+                                                     _ -> failure
+                                           end
+                end,
+    % Block until we receive socket_assigned from oneshot.
+    % We can only set controlling_process after this process
+    % is given control itself by the async handle_info.
+    receive
+      socket_assigned -> case ClientPid of
+                           failure -> gen_tcp:close(CliSock);
+                                 P -> gen_tcp:controlling_process(CliSock, P),
+                                      P ! {socket_ready, CliSock}
+                         end
+    end
   end.
