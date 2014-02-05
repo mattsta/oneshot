@@ -25,6 +25,7 @@ Usage
 `handler/0` receives a `{socket_ready, Sock}` message then loops forever just
 echoing back input to the client.  The process gets killed when the connection
 closes.
+
         handler() ->
           receive
             {socket_ready, Sock} -> inet:setopts(Sock, [{active, once}]),
@@ -40,6 +41,7 @@ closes.
 If we need local state information in the handler,
 encapsulate a function in a local fun to provide state information
 to our handler (because all handlers must have arity 0):
+
         handler(ServerPid) ->
           handler(ServerPid, []).
 
@@ -65,14 +67,17 @@ to our handler (because all handlers must have arity 0):
 Building
 --------
 Build:
+
         rebar compile
 
 Test
 ----
 Automated concurrency tests:
+
         rebar eunit
 
 Automated concurrency tests with timing details:
+
         rebar eunit -v
 
 History
