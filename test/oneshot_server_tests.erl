@@ -70,7 +70,7 @@ echo_servers_in_parallel_test_() ->
     fun setup_servers/0,
     fun cleanup_servers/1,
     fun(_) -> 
-      {inparallel, 
+      {inparallel, 100,
         [
           [?_E(<<"hello">>, ?B(recv(send(?S1, "hello")))) ||
             _ <- lists:seq(1, 500)],
