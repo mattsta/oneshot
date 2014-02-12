@@ -2,6 +2,7 @@
 -behaviour(gen_server).
 
 -export([start_link/3, start_link/4, start_link/5]).
+-export([protocol_start_link/3]).
 -export([init/1]).
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 -export([terminate/2, code_change/3]).
@@ -12,6 +13,9 @@
                  function :: atom(),
                  args     :: list()}).
 
+%%====================================================================
+%% Starters
+%%====================================================================
 start_link(IP, Port, ModuleOrFun) ->
   % We default to start_link so the previous API that defaulted to using
   % Module:start_link(Args)
@@ -24,10 +28,17 @@ start_link(IP, Port, Module, Function) ->
 start_link(IP, Port, M, F, A) ->
   gen_server:start_link(?MODULE, [IP, Port, M, F, A], []).
 
+protocol_start_link(IP, Port, ServiceTable) ->
+    start_link(IP, Port, fun() -> oneshot_protocol:run(ServiceTable) end).
 
+
+%%====================================================================
+%% gen_server callbacks
+%%====================================================================
 init([PreIP, Port, ModuleOrFun, Function, Args]) when
     (is_list(PreIP) orelse is_tuple(PreIP)) andalso is_atom(Function) ->
-%  process_flag(trap_exit, true),
+%  process_flag(trap_exit, true),  % we should re-enable this and make it work
+                                   % (just unlink as necessary).
 
   {ok, IP} = inet:getaddr(PreIP, inet),
 
@@ -84,6 +95,9 @@ handle_info(Other, State) ->
   error_logger:error_msg("oneshot_server: unexpected info of ~p~n", [Other]),
   {noreply, State}.
 
+%%====================================================================
+%% Internal erlang API manipulation
+%%====================================================================
 set_sockopt(ListenSock, CliSock) ->
   true = inet_db:register_socket(CliSock, inet_tcp),
   case prim_inet:getopts(ListenSock, [active, nodelay,
@@ -96,6 +110,9 @@ set_sockopt(ListenSock, CliSock) ->
      Error -> gen_tcp:close(CliSock), Error
   end.
 
+%%====================================================================
+%% Client function launching and socket control re-assignment
+%%====================================================================
 -spec launch_client(port(), atom() | function(), atom(), list()) -> function().
 launch_client(CliSock, ModuleOrFun, F, A) ->
   fun() ->
