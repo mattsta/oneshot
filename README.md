@@ -26,59 +26,62 @@ Usage
 echoing back input to the client.  The process gets killed when the connection
 closes.
 
-        handler() ->
-          receive
+```erlang
+    handler() ->
+        receive
             {socket_ready, Sock} -> inet:setopts(Sock, [{active, once}]),
                                     handler();
             {tcp, Sock, Bin} -> gen_tcp:send(Sock, Bin),
                                 inet:setopts(Sock, [{active, once}]),
                                 handler()
-          end.
+        end
+    end.
 
-        init() -> oneshot:start_link("127.0.0.1", 6643, fun handler/0).
+    init() -> oneshot:start_link("127.0.0.1", 6643, fun handler/0).
+```
 
 ### More Complex Usage
 If we need local state information in the handler,
 encapsulate a function in a local fun to provide state information
 to our handler (because all handlers must have arity 0):
 
-        handler(ServerPid) ->
-          handler(ServerPid, []).
+```erlang
+   handler(ServerPid) ->
+     handler(ServerPid, []).
 
-        handler(ServerPid, Acc) ->
-          receive
-            {socket_ready, Socket} -> inet:setopts(Socket, [{active, once}]),
-                                      handler(ServerPid, Acc);
-            {tcp, Socket, Bin} -> inet:setopts(Socket, [{active, once}]),
-                                  NewAcc = [Bin | Acc],
-                                  gen_server:call(ServerPid, NewAcc),
-                                  handler(ServerPid, NewAcc)
-          end.
+   handler(ServerPid, Acc) ->
+     receive
+       {socket_ready, Socket} -> inet:setopts(Socket, [{active, once}]),
+                                 handler(ServerPid, Acc);
+       {tcp, Socket, Bin} -> inet:setopts(Socket, [{active, once}]),
+                             NewAcc = [Bin | Acc],
+                             gen_server:call(ServerPid, NewAcc),
+                             handler(ServerPid, NewAcc)
+     end.
 
-        setup_server(IP, Port) ->
-          ThisGenServer = self(),
-          oneshot_server:start_link(IP, Port,
-                                    fun() ->
-                                      handler(ThisGenServer)
-                                    end).
-
-
+   setup_server(IP, Port) ->
+     ThisGenServer = self(),
+     oneshot_server:start_link(IP, Port,
+                               fun() ->
+                                 handler(ThisGenServer)
+                               end).
+```
 
 Building
 --------
 Build:
 
-        rebar compile
+    rebar compile
 
 Test
 ----
 Automated concurrency tests:
 
-        rebar eunit
+    rebar eunit
 
 Automated concurrency tests with timing details:
 
-        rebar eunit -v
+    rebar eunit -v
 
 History
 -------
