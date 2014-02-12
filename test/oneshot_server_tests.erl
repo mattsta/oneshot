@@ -32,7 +32,7 @@ setup_servers() ->
   [P || {ok, P} <- [S1, S2, S3]].
 
 cleanup_servers(Ps) ->
-  [exit(P, normal) || P <- Ps].
+  [gen_server:call(P, shutdown) || P <- Ps].
 
 %%====================================================================
 %% Send data to a server; returns {Socket, TotalDataLength}

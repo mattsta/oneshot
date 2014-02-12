@@ -46,7 +46,7 @@ init([PreIP, Port, ModuleOrFun, Function, Args]) when
     {error, Reason} -> {stop, Reason}
   end.
 
-handle_call(oneshot_shutdown, _From, State) ->
+handle_call(shutdown, _From, State) ->
   {stop, normal, shutdown_complete, State}.
 
 handle_cast(_Msg, State) -> {noreply, State}.
