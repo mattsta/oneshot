@@ -18,9 +18,8 @@ start_oneshot(IP, Port, Module, Function) when is_integer(Port) ->
 start_oneshot(IP, Port, Module, Function, Args) when is_integer(Port) ->
   supervisor:start_child(?MODULE, [IP, Port, Module, Function, Args]).
 
-stop_oneshot(OneshotPid) ->
-  gen_server:call(OneshotPid, oneshot_shutdown).
-  %supervisor:terminate_child(?MODULE, Pid).  % R14B03+
+stop_oneshot(Pid) ->
+  supervisor:terminate_child(?MODULE, Pid).  % R14B03+
 
 
 start_link() ->

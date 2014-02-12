@@ -29,10 +29,11 @@ setup_servers() ->
   S2 = oneshot_server:start_link("127.0.0.1", 6652, fun echo_server/0),
   S3 = oneshot_sup:start_oneshot("127.0.0.1", 6653, fun echo_server/0),
 
-  [P || {ok, P} <- [S1, S2, S3]].
+  {[P || {ok, P} <- [S1, S2]], [P || {ok, P} <- [S3]]}.
 
-cleanup_servers(Ps) ->
-  [gen_server:call(P, shutdown) || P <- Ps].
+cleanup_servers({Normal, Supervised}) ->
+  [gen_server:call(P, shutdown) || P <- Normal],
+  [oneshot_sup:stop_oneshot(P) || P <- Supervised].
 
 %%====================================================================
 %% Send data to a server; returns {Socket, TotalDataLength}
