@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 -export([start_link/3, start_link/4, start_link/5]).
--export([protocol_start_link/3]).
+-export([protocol_start_link/3, protocol_start_link/4]).
 -export([init/1]).
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 -export([terminate/2, code_change/3]).
@@ -30,6 +30,10 @@ start_link(IP, Port, M, F, A) ->
 
 protocol_start_link(IP, Port, ServiceTable) ->
     start_link(IP, Port, fun() -> oneshot_protocol:run(ServiceTable) end).
+
+protocol_start_link(IP, Port, ServiceTable, Bundler) ->
+    start_link(IP, Port,
+      fun() -> oneshot_protocol:run(ServiceTable, Bundler) end).
 
 
 %%====================================================================

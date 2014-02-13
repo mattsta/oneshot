@@ -11,6 +11,7 @@
 -define(B(X), iolist_to_binary(X)).
 -define(F(X), error_logger:error_msg("~p~n", [X])).
 
+-compile(export_all).
 -export([describe_service/0]).
 
 %%====================================================================
@@ -111,11 +112,11 @@ create_cluster_masters_replicas_success() ->
 %% protocol descriptor table for tests
 %%====================================================================
 describe_service() ->
-    [{"create", [{"standalone", fun create_standalone/0},
-                 {"master-replica", [fun create_master_replica/0,
-                                     {"replicas", str, fun create_master_replica/1}]},
-                 {"cluster", [{"total-nodes", str, fun create_cluster_total/1},
-                              {"masters", str, "replicas", str, fun create_cluster_mr/2}]}]}].
+    [{"create", [{"standalone", {?MODULE, create_standalone}},
+                 {"master-replica", [{?MODULE, create_master_replica},
+                                     {"replicas", str, {?MODULE, create_master_replica}}]},
+                 {"cluster", [{"total-nodes", str, {?MODULE, create_cluster_total}},
+                              {"masters", str, "replicas", str, {?MODULE, create_cluster_mr}}]}]}].
 
 create_standalone() -> "created_standalone".
 create_master_replica() -> "created_master_replica".

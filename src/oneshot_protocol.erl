@@ -1,10 +1,10 @@
 -module(oneshot_protocol).
 
 % Used by oneshot
--export([run/1]).
+-export([run/1, run/2]).
 
 % Used for testing
--export([eval/2]).
+-export([eval/3]).
 
 -import(lists, [filter/2]).
 %%--------------------------------------------------------------------
@@ -12,29 +12,32 @@
 %%--------------------------------------------------------------------
 % Parse client command.
 run(ServicesTable) ->
-  run(ServicesTable, []).
+  run(ServicesTable, fun(_) -> [] end, []).
 
-run(S, Acc) ->
+run(ServicesTable, Bundler) ->
+  run(ServicesTable, Bundler, []).
+
+run(S, Bundler, Acc) ->
     receive
         {socket_ready, Socket} -> inet:setopts(Socket, [{active, once}]),
-                                  run(S, Acc);
+                                  run(S, Bundler, Acc);
             {tcp, Socket, Bin} -> NewAcc = [Bin | Acc],
                                   BinSz = size(Bin) - 1, % binpats no do math
                                   <<_:BinSz/binary, Last:1/binary>> = Bin,
                                   case Last of
-                                      <<"\n">> -> respond(Socket, S,
+                                      <<"\n">> -> respond(Socket, S, Bundler,
                                                    lists:reverse(NewAcc));
                                              _ -> inet:setopts(Socket, [{active, once}]),
-                                                  run(S, NewAcc)
+                                                  run(S, Bundler, NewAcc)
                                   end
     after
         30000 -> exit(self(), normal)  % 30 second command timeout
     end.
 
-respond(Socket, ServicesTable, Input) ->
+respond(Socket, ServicesTable, Bundler, Input) ->
     Response =
     try
-        process_request(ServicesTable, iolist_to_binary(Input))
+        process_request(ServicesTable, Bundler, iolist_to_binary(Input))
     catch
         throw:Err -> re:replace(
                       io_lib:format("PROTOCOL ERROR: ~p~n", [Err]),
@@ -52,21 +55,21 @@ respond(Socket, ServicesTable, Input) ->
 %%--------------------------------------------------------------------
 % The default protocol here is just space separated commands terminated by a newline.
 % Convert user input to lowercase tokenized list of strings.
-process_request(ServiceTable, Request) when is_binary(Request) ->
+process_request(ServiceTable, Bundler, Request) when is_binary(Request) ->
     Str = binary_to_list(Request),
     Lower = string:to_lower(Str),
     [Service | Command] = string:tokens(Lower, " \r\n"),
     try
-        eval_command(ServiceTable, list_to_existing_atom(Service), Command)
+        eval_command(ServiceTable, Bundler, list_to_existing_atom(Service), Command)
     catch
         error:badarg -> throw({no_service, Service, for, Command})
     end.
 
-eval_command(ServiceTable, Service, Command) when
+eval_command(ServiceTable, Bundler, Service, Command) when
   (is_atom(ServiceTable) orelse is_integer(ServiceTable)) andalso
   is_atom(Service) andalso is_list(Command) ->
     case ets:lookup(ServiceTable, Service) of
-        [{Service, ServiceModule}] -> eval(Command, ServiceModule:describe_service());
+        [{Service, ServiceModule}] -> eval(Command, ServiceModule:describe_service(), Bundler(Service));
                                 [] -> throw({no_service, Service, for, Command})
     end.
 
@@ -83,23 +86,22 @@ eval_command(ServiceTable, Service, Command) when
 %
 % If we are on the last input command, see if the matching
 % command set is a tuple of {Cmd, Fun}:
-eval([Cmd], [{Cmd, Fun}|_]) when is_function(Fun) ->
-    Fun();
+eval([Cmd], [{Cmd, {Mod, Fun}}|_], ExtraArgs) ->
+    apply(Mod, Fun, ExtraArgs);
 % If we are on the last input command, iterate over the
 % command set to find the one function to run.
 % (The fun has zero arity by definition of having no args)
-eval([Cmd], [{Cmd, CmdOpts}|_]) when is_list(CmdOpts) ->
-    case filter(fun(E) when is_function(E) -> true;
-                   (_) -> false end, CmdOpts) of
-        [FoundFun] -> FoundFun();
-                 _ -> throw({nomatch, {need_more_commands_after, Cmd}})
+eval([Cmd], [{Cmd, CmdOpts}|_], ExtraArgs) when is_list(CmdOpts) ->
+    case filter(fun({_ ,_}) -> true; (_) -> false end, CmdOpts) of
+        [{Mod, Fun}] -> apply(Mod, Fun, ExtraArgs);
+                    _ -> throw({nomatch, {need_more_commands_after, Cmd}})
     end;
 % If we find a match for the current input command level,
 % (on a tuple of two elements)
 % use the matching argument list and move on to the next
 % input command.
-eval([Cmd|T], [{Cmd, Fields}|_]) when is_list(Fields) ->
-    eval(T, Fields);
+eval([Cmd|T], [{Cmd, Fields}|_], ExtraArgs) when is_list(Fields) ->
+    eval(T, Fields, ExtraArgs);
 % If we find a match for the current input command level,
 % (on a tuple of unknown arity at the moment),
 % this means we found a sub-command taking arguments we
@@ -108,52 +110,52 @@ eval([Cmd|T], [{Cmd, Fields}|_]) when is_list(Fields) ->
 % Dive into parsing out position-based parameters
 % from the arguments then apply them to the action
 % function with fun_with_args/2.
-eval([Cmd|T], [CmdWithArgs|_]) when is_tuple(CmdWithArgs) andalso element(1, CmdWithArgs) =:= Cmd ->
-    fun_with_args(T, tl(tuple_to_list(CmdWithArgs)));
+eval([Cmd|T], [CmdWithArgs|_], ExtraArgs) when is_tuple(CmdWithArgs) andalso element(1, CmdWithArgs) =:= Cmd ->
+    fun_with_args(T, tl(tuple_to_list(CmdWithArgs)), ExtraArgs);
 % If we haven't found a command match yet, recurse
 % on the command definitions.
-eval(Args, [_|T]) ->
-    eval(Args, T);
+eval(Args, [_|T], ExtraArgs) ->
+    eval(Args, T, ExtraArgs);
 % If nothing matches, error out.
-eval(Args, _) ->
+eval(Args, _, _) ->
     throw({nomatch, command_not_found, {remaining_args, Args}}).
 
-fun_with_args(CmdParts, SpecParts) ->
-    fun_with_args(CmdParts, SpecParts, []).
+fun_with_args(CmdParts, SpecParts, ExtraArgs) ->
+    fun_with_args(CmdParts, SpecParts, ExtraArgs,  []).
 
 % If we ran out of command input and there is one remaining
 % item on the command set is a function, we successfully
 % mathed the input. Send the found arguments to the function.
-fun_with_args([], [F], Acc) when is_function(F) ->
-    apply(F, lists:reverse(Acc));
+fun_with_args([], [{Mod, Fun}], ExtraArgs, Acc) ->
+    apply(Mod, Fun, ExtraArgs ++ lists:reverse(Acc));
 % If we ran out of command input, but have more than
 % one element in the command set list left over, then we
 % didn't get enough input to run our function.  Abort.
-fun_with_args([], _MultipleThingsLeftOver, Acc) ->
+fun_with_args([], _MultipleThingsLeftOver, _, Acc) ->
     throw({nomatch, need_more_args, {processed_args, lists:reverse(Acc)}});
 % If the command input matches the level of the command set,
 % just recurse on both.
-fun_with_args([Arg|T], [Arg|SpecT], Acc) ->
-    fun_with_args(T, SpecT, Acc);
+fun_with_args([Arg|T], [Arg|SpecT], EA, Acc) ->
+    fun_with_args(T, SpecT, EA, Acc);
 % If the command input matches the location of a variable atom
 % in the command set, add the command input to our
 % accumulator for future application.
 % Allow auto-converted types of: string, integer, atom, eatom, binary
-fun_with_args([Arg|T], [str|SpecT], Acc) ->
-    fun_with_args(T, SpecT, [Arg | Acc]);
-fun_with_args([Arg|T], [int|SpecT], Acc) ->
-    fun_with_args(T, SpecT, [list_to_integer(Arg) | Acc]);
-fun_with_args([Arg|T], [atom|SpecT], Acc) ->
-    fun_with_args(T, SpecT, [list_to_atom(Arg) | Acc]);
-fun_with_args([Arg|T], [eatom|SpecT], Acc) ->
-    fun_with_args(T, SpecT, [list_to_existing_atom(Arg) | Acc]);
-fun_with_args([Arg|T], [bin|SpecT], Acc) ->
-    fun_with_args(T, SpecT, [list_to_binary(Arg) | Acc]);
+fun_with_args([Arg|T], [str|SpecT], EA, Acc) ->
+    fun_with_args(T, SpecT, EA, [Arg | Acc]);
+fun_with_args([Arg|T], [int|SpecT], EA, Acc) ->
+    fun_with_args(T, SpecT, EA, [list_to_integer(Arg) | Acc]);
+fun_with_args([Arg|T], [atom|SpecT], EA, Acc) ->
+    fun_with_args(T, SpecT, EA, [list_to_atom(Arg) | Acc]);
+fun_with_args([Arg|T], [eatom|SpecT], EA, Acc) ->
+    fun_with_args(T, SpecT, EA, [list_to_existing_atom(Arg) | Acc]);
+fun_with_args([Arg|T], [bin|SpecT], EA, Acc) ->
+    fun_with_args(T, SpecT, EA, [list_to_binary(Arg) | Acc]);
 % If the input command didn't match a positional
 % command set argument OR a positional command set
 % variable indicator, then the user entered an
 % incorrect command.  Abort.
-fun_with_args(ArgNoMatch, _NoMatchSpec, Acc) ->
+fun_with_args(ArgNoMatch, _NoMatchSpec, _, Acc) ->
     throw({nomatch, too_many_arguments,
            {extra_args, ArgNoMatch},
            {processed_args, lists:reverse(Acc)}}).
