@@ -22,6 +22,8 @@ protocol_test_() ->
     fun setup_servers/0,
     fun teardown_servers/1,
     [
+     {"Format Response (RESP) Tests",
+      fun responses/0},
      {"Test non-service-table entry failure",
       fun non_entry/0},
      {"Test non-existing top level command failure",
@@ -56,6 +58,20 @@ protocol_test_() ->
 %%====================================================================
 %% Tests
 %%====================================================================
+% format_response/1 returns a deep list of stuff, so flatten here for matching.
+-define(FR(Input), iolist_to_binary(oneshot_protocol:format_response(Input))).
+responses() ->
+    ?E(<<"+OK\r\n">>, ?FR(ok)),
+    ?E(<<"$-1\r\n">>, ?FR(null)),
+    ?E(<<"$-1\r\n">>, ?FR(undefined)),
+    ?E(<<":3000\r\n">>, ?FR(3000)),
+    ?E(<<"$4\r\n3000\r\n">>, ?FR(<<"3000">>)),
+    ?E(<<"*3\r\n+OK\r\n$5\r\nhello\r\n:600\r\n">>,
+        ?FR([ok, <<"hello">>, 600])),
+    % nested multibulk
+    ?E(<<"*3\r\n+OK\r\n$5\r\nhello\r\n*3\r\n$4\r\nmore\r\n:512\r\n+NOGO\r\n">>,
+        ?FR([ok, <<"hello">>, [<<"more">>, 512, nogo]])).
+
 % Note: the ?EM wrapper calls rs/2 which adds the command newline
 % The ?EM macro does three compound operations to minimize repetitiveness below.
 non_entry() ->
@@ -69,11 +85,12 @@ create_fail() ->
     ?EM("redis create", "need_more_commands_after").
 
 create_success() ->
-    ?EM("redis create StanDaLonE", "created_standalone"),
+%    ?F(rs(?S1, "redis create standalone")),
+    ?EM("redis create StanDaLonE", "CREATED[.\r\n+]*STANDALONE"),
     ?EM("redis create standalone but with extra", "too_many_arguments").
 
 create_mr_success() ->
-    ?EM("redis create master-replica", "created_master_replica").
+    ?EM("redis create master-replica", "CREATED_MASTER_REPLICA").
 
 create_mr_replicas_failure() ->
     ?EM("redis create master-replica replicas", "need_more_args").
@@ -118,12 +135,15 @@ describe_service() ->
                  {"cluster", [{"total-nodes", str, {?MODULE, create_cluster_total}},
                               {"masters", str, "replicas", str, {?MODULE, create_cluster_mr}}]}]}].
 
-create_standalone() -> "created_standalone".
-create_master_replica() -> "created_master_replica".
-create_master_replica(ReplicaCount) -> io_lib:format("mr_count_~s", [ReplicaCount]).
-create_cluster_total(NodeCount) -> io_lib:format("node_count_~s", [NodeCount]).
+create_standalone() -> [created, standalone].
+create_master_replica() -> created_master_replica.
+create_master_replica(ReplicaCount) ->
+    iolist_to_binary(io_lib:format("mr_count_~s", [ReplicaCount])).
+create_cluster_total(NodeCount) ->
+    iolist_to_binary(io_lib:format("node_count_~s", [NodeCount])).
 create_cluster_mr(MasterCount, ReplicaPerMasterCount) ->
-  io_lib:format("MC_RPMC_~s_~s", [MasterCount, ReplicaPerMasterCount]).
+    iolist_to_binary(
+     io_lib:format("MC_RPMC_~s_~s", [MasterCount, ReplicaPerMasterCount])).
 
 %%====================================================================
 %% Setup/teardown for each test suite
