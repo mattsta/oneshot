@@ -21,19 +21,49 @@ run(ServicesTable, Bundler) ->
 
 run(S, Bundler, Acc) ->
     receive
-        {socket_ready, Socket} -> inet:setopts(Socket, [{active, once}]),
+        {socket_ready, Socket} -> inet:setopts(Socket, [{active, once}, {packet, line}]),
                                   run(S, Bundler, Acc);
-            {tcp, Socket, Bin} -> NewAcc = [Bin | Acc],
-                                  BinSz = size(Bin) - 1, % binpats no do math
-                                  <<_:BinSz/binary, Last:1/binary>> = Bin,
-                                  case Last of
-                                      <<"\n">> -> respond(Socket, S, Bundler,
-                                                   lists:reverse(NewAcc));
-                                             _ -> inet:setopts(Socket, [{active, once}]),
-                                                  run(S, Bundler, NewAcc)
-                                  end
+           {tcp, Socket, Line} -> case Line of
+                                     % If first char is *, this is a redis protocol.  Parse then respond.
+                                     % NOTE: Inbound Redis protocol is *only* multibulk *ARGC\r\n{$SZ\r\nARGV\r\n}
+                                     <<"*", CountNL/binary>> ->
+                                        Count = list_to_integer(binary_to_list(strip_nl(CountNL))),
+                                        RedisLine = redis_input(Socket, Count),
+                                        respond(Socket, S, Bundler, RedisLine);
+                                     % Else, plain text protocol.  Respond normally.
+                                     _ -> respond(Socket, S, Bundler, Line)
+                                   end;
+         {tcp_closed, _Socket} -> exit(self(), normal)
     after
         30000 -> exit(self(), normal)  % 30 second command timeout
+    end.
+
+redis_input(Socket, Count) ->
+    redis_input(Socket, Count, []).
+
+redis_input(_, 0, Acc) ->
+    iolist_to_binary(lists:reverse(Acc));
+redis_input(Socket, Count, Acc) when Count > 0 ->
+    inet:setopts(Socket, [{active, once}, {packet, line}]),
+    receive
+        {tcp, Socket, Line} ->
+            case Line of
+                <<"$", SizeNL/binary>> ->
+                    Size = list_to_integer(binary_to_list(strip_nl(SizeNL))),
+                    inet:setopts(Socket, [{packet, raw}]),
+                    {ok, Data} = gen_tcp:recv(Socket, Size),
+                    gen_tcp:recv(Socket, 2), % throw away \r\n
+                    % Poor way of doing join(Input, " ") below, but the
+                    % extraneous " " will get tokenized away.
+                    redis_input(Socket, Count-1, [<<" ">>, Data | Acc]);
+                     % Note: this error will *not* return an error to
+                     % the client.  Client errors only get generated once
+                     % we are in the `try` of repond/4.
+                O -> {error, unsupported_input_found, O}
+            end;
+        {tcp_closed, _Socket} -> exit(self(), normal)
+    after
+        30000 -> exit(self(), normal)  % stop a too-high Count from lingering
     end.
 
 respond(Socket, ServicesTable, Bundler, Input) ->
@@ -70,6 +100,10 @@ format_response(Response) when is_atom(Response) ->
 format_response({error, Type, Err}) when is_atom(Type) andalso is_binary(Err) ->
     ["-", string:to_upper(atom_to_list(Type)), " ", Err, ?RN].
 
+strip_nl(B) when is_binary(B) ->
+  S = size(B) - 2,  % 2 = size(<<"\r\n">>)
+  <<B1:S/binary, _/binary>> = B,
+  B1.
 %%--------------------------------------------------------------------
 %%% Protocol Handler
 %%--------------------------------------------------------------------

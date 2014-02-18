@@ -51,7 +51,9 @@ protocol_test_() ->
      {"Test CREATE CLUSTER MASTERS N REPLICAS failure",
       fun create_cluster_masters_N_replicas_failure/0},
      {"Test CREATE CLUSTER MASTERS N REPLICAS N success",
-      fun create_cluster_masters_replicas_success/0}
+      fun create_cluster_masters_replicas_success/0},
+     {"Test Inbound Redis Protocol",
+      fun redis_inbound_protocol_success/0}
     ]
   }.
 
@@ -70,7 +72,10 @@ responses() ->
         ?FR([ok, <<"hello">>, 600])),
     % nested multibulk
     ?E(<<"*3\r\n+OK\r\n$5\r\nhello\r\n*3\r\n$4\r\nmore\r\n:512\r\n+NOGO\r\n">>,
-        ?FR([ok, <<"hello">>, [<<"more">>, 512, nogo]])).
+        ?FR([ok, <<"hello">>, [<<"more">>, 512, nogo]])),
+    ?E(<<"-PROTOCOL bad send\r\n">>, ?FR({error, protocol, <<"bad send">>})),
+    ?E(<<"-ERR other BAD thing\r\n">>, ?FR({error, err, <<"other BAD thing">>})).
+
 
 % Note: the ?EM wrapper calls rs/2 which adds the command newline
 % The ?EM macro does three compound operations to minimize repetitiveness below.
@@ -121,6 +126,9 @@ create_cluster_masters_N_replicas_failure() ->
 create_cluster_masters_replicas_success() ->
     ?EM("redis create cluster masters 500 replicas 6000", "MC_RPMC_500_6000"),
     ?EM("redis create cluster masters 500 replicas 6000 and even more", "too_many_arguments").
+
+redis_inbound_protocol_success() ->
+    ?EM("*3\r\n$5\r\nredis\r\n$6\r\ncreate\r\n$10\r\nstandalone\r\n", "CREATED[.\r\n+]*STANDALONE").
 
 %%====================================================================
 %% Test Setup
