@@ -79,10 +79,13 @@ respond(Socket, ServicesTable, Bundler, Input) ->
                         "  |\n", "", [global]))}
 
     end,
+    send_reply(Socket, Response),
+    exit(normal).
+
+send_reply(Socket, Response) ->
     FormattedResponse = format_response(Response),
     gen_tcp:send(Socket, FormattedResponse),
-    gen_tcp:close(Socket),
-    exit(normal).
+    gen_tcp:close(Socket).
 
 format_response(Response) when is_list(Response) ->
     ["*", integer_to_list(length(Response)), ?RN,
@@ -113,10 +116,13 @@ process_request(ServiceTable, Bundler, Request) when is_binary(Request) ->
     Str = binary_to_list(Request),
     Lower = string:to_lower(Str),
     [Service | Command] = string:tokens(Lower, " \r\n"),
-    try
-        eval_command(ServiceTable, Bundler, list_to_existing_atom(Service), Command)
-    catch
-        error:badarg -> throw({no_service, Service, for, Command})
+    case Service of
+        "ping" -> pong;
+             _ -> try
+                    eval_command(ServiceTable, Bundler, list_to_existing_atom(Service), Command)
+                  catch
+                    error:badarg -> throw({no_service, Service, for, Command})
+                  end
     end.
 
 eval_command(ServiceTable, Bundler, Service, Command) when

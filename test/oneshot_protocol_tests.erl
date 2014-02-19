@@ -53,7 +53,9 @@ protocol_test_() ->
      {"Test CREATE CLUSTER MASTERS N REPLICAS N success",
       fun create_cluster_masters_replicas_success/0},
      {"Test Inbound Redis Protocol",
-      fun redis_inbound_protocol_success/0}
+      fun redis_inbound_protocol_success/0},
+     {"Test Ping",
+      fun ping/0}
     ]
   }.
 
@@ -129,6 +131,11 @@ create_cluster_masters_replicas_success() ->
 
 redis_inbound_protocol_success() ->
     ?EM("*3\r\n$5\r\nredis\r\n$6\r\ncreate\r\n$10\r\nstandalone\r\n", "CREATED[.\r\n+]*STANDALONE").
+
+ping() ->
+    ?EM("ping", "PONG"),
+    ?EM("PING", "PONG"),
+    ?EM("PinG", "PONG").
 
 %%====================================================================
 %% Test Setup
